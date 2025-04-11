@@ -5,10 +5,14 @@ import (
 	"os"
 	"time"
 
+	"github.com/deepch/RTSPtoWeb/libraries"
 	"github.com/gin-gonic/autotls"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// var DB *sql.DB // pastikan sudah di-setup di file init
 
 // Message resp struct
 type Message struct {
@@ -46,9 +50,46 @@ func HTTPAPIServer() {
 
 	if Storage.ServerHTTPDemo() {
 		public.LoadHTMLGlob(Storage.ServerHTTPDir() + "/templates/*")
-		public.GET("/", HTTPAPIServerIndex)
+
+		// public.LoadHTMLGlob(Storage.ServerHTTPDir() + "/templates/*.tmpl")
+		// public.StaticFS("/img", http.Dir(Storage.ServerHTTPDir()+"/templates/img"))
+
+		// public.GET("/", HTTPAPIServerIndex)
+		public.GET("/", libraries.RequireLogin(), HTTPAPIServerIndex)
 		public.GET("/pages/stream/list", HTTPAPIStreamList)
 		public.GET("/pages/stream/add", HTTPAPIAddStream)
+
+		public.GET("/login", func(c *gin.Context) {
+			c.HTML(http.StatusOK, "login.tmpl", nil)
+		})
+
+		public.POST("/login", func(c *gin.Context) {
+			username := c.PostForm("username")
+			password := c.PostForm("password")
+
+			var hashedPassword string
+			err := DB.QueryRow("SELECT password FROM users WHERE username=?", username).Scan(&hashedPassword)
+			if err != nil {
+				c.HTML(http.StatusUnauthorized, "login.tmpl", gin.H{"error": "Username atau password salah!"})
+				return
+			}
+
+			err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+			if err != nil {
+				c.HTML(http.StatusUnauthorized, "login.tmpl", gin.H{"error": "Username atau password salah!"})
+				return
+			}
+
+			libraries.SetCookieUser(c, username)
+			c.Redirect(http.StatusFound, "/")
+		})
+
+		public.GET("/logout", func(c *gin.Context) {
+			libraries.ClearCookieUser(c)
+			c.Redirect(http.StatusFound, "/login")
+		})
+
+		// Ini bagian yang tadinya di luar if
 		public.GET("/pages/stream/edit/:uuid", HTTPAPIEditStream)
 		public.GET("/pages/player/hls/:uuid/:channel", HTTPAPIPlayHls)
 		public.GET("/pages/player/mse/:uuid/:channel", HTTPAPIPlayMse)
@@ -58,12 +99,9 @@ func HTTPAPIServer() {
 		public.GET("/pages/documentation", HTTPAPIServerDocumentation)
 		public.GET("/pages/player/all/:uuid/:channel", HTTPAPIPlayAll)
 		public.StaticFS("/static", http.Dir(Storage.ServerHTTPDir()+"/static"))
-	}
+	} // <--- penutup if dipindahkan ke sini
 
-	/*
-		Stream Control elements
-	*/
-
+	// Sekarang blok privat bisa dideklarasikan di luar
 	privat.GET("/streams", HTTPAPIServerStreams)
 	privat.POST("/stream/:uuid/add", HTTPAPIServerStreamAdd)
 	privat.POST("/stream/:uuid/edit", HTTPAPIServerStreamEdit)
